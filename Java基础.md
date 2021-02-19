@@ -362,4 +362,518 @@ JDK8扩容机制相比之前版本进行了优化，HashMap大小始终是2次�
 1. 扩容操作非常消耗性能，所以在使用HashMap的时候，估算map的大小，初始化的时候给一个大致的估值，避免频繁扩容
 2. 负载因子可以修改，但除非特殊情况，否则不建议修改
 3. HashMap是线程不安全的，不能在并发环境使用HashMap
-4. JDK1.8引入了红黑树，优化了HashMap性能
+4. JDK1.8引入了红黑树，优化了HashMap性能1. 
+
+### LinkedHashMap
+
+LinkedHashMap是HashMap的子类，保存了记录的插入顺序，遍历时按照插入顺序返回结果，也可以在构造时带参数，按照访问次序排序。
+
+```java
+    // 双向链表记录节点插入顺序
+	static class Entry<K,V> extends HashMap.Node<K,V> {
+        Entry<K,V> before, after;
+        Entry(int hash, K key, V value, Node<K,V> next) {
+            super(hash, key, value, next);
+        }
+    }
+    
+    /**
+     * The head (eldest) of the doubly linked list.
+     */
+    transient LinkedHashMap.Entry<K,V> head;
+
+    /**
+     * The tail (youngest) of the doubly linked list.
+     */
+    transient LinkedHashMap.Entry<K,V> tail;
+```
+
+### TreeMap
+
+TreeMap继承自AbstractMap，并实现了NavigableMap、Cloneable和Serializable接口，AbstractMap实现了大部分Map接口支持的方法，NavigableMap接口继承自SortedMap接口，SortedMap存储的是有序的键值对，其内部维护了一个Comparator比较器，因此TreeMap具备以下特性：
+
+- 有序
+- 支持克隆
+- 支持序列化
+
+#### 存储结构
+
+TreeMap内部使用红黑树存储元素。
+
+```java
+private transient Entry<K,V> root; //根节点
+
+static final class Entry<K,V> implements Map.Entry<K,V> {
+    K key;//存储键
+    V value;//存储值
+    Entry<K,V> left;//左子树节点引用
+    Entry<K,V> right;//右子树节点引用
+    Entry<K,V> parent;//父节点引用
+    boolean color = BLACK;//颜色
+    /**
+     * Make a new cell with given key, value, and parent, and with
+     * {@code null} child links, and BLACK color.
+     */
+    Entry(K key, V value, Entry<K,V> parent) {
+        this.key = key;
+        this.value = value;
+        this.parent = parent;
+    }
+}
+```
+
+#### put方法
+
+将一个节点添加到红黑树中，通常需要以下几个步骤：
+
+1. 将红黑树当成普通二叉查找树，将节点插入
+2. 将新插入的节点设置为红色
+3. 通过旋转和着色，使其恢复平衡，重新变成一颗符合规则的红黑树
+
+```java
+public V put(K key, V value) {
+    Entry<K,V> t = root;
+    if (t == null) {//如果root为null 说明是添加第一个元素 直接实例化一个Entry 赋值给root
+        compare(key, key); // type (and possibly null) check
+        root = new Entry<>(key, value, null);
+        size = 1;
+        modCount++;
+        return null;
+    }
+    int cmp;
+    Entry<K,V> parent;//如果root不为null，说明已存在元素 
+    // split comparator and comparable paths
+    Comparator<? super K> cpr = comparator; 
+    if (cpr != null) { //如果比较器不为null 则使用比较器
+        //找到元素的插入位置
+        do {
+            parent = t; //parent赋值
+            cmp = cpr.compare(key, t.key);
+            //当前key小于节点key 向左子树查找
+            if (cmp < 0)
+                t = t.left;
+            else if (cmp > 0)//当前key大于节点key 向右子树查找
+                t = t.right;
+            else //相等的情况下 直接更新节点值
+                return t.setValue(value);
+        } while (t != null);
+    }
+    else { //如果比较器为null 则使用默认比较器
+        if (key == null)//如果key为null  则抛出异常
+            throw new NullPointerException();
+        @SuppressWarnings("unchecked")
+            Comparable<? super K> k = (Comparable<? super K>) key;
+       
+        //找到元素的插入位置
+        do {
+            parent = t;
+            cmp = k.compareTo(t.key);
+            if (cmp < 0)
+                t = t.left;
+            else if (cmp > 0)
+                t = t.right;
+            else
+                return t.setValue(value);
+        } while (t != null);
+    }
+    Entry<K,V> e = new Entry<>(key, value, parent);//定义一个新的节点
+    //根据比较结果决定插入到左子树还是右子树
+    if (cmp < 0)
+        parent.left = e;
+    else
+        parent.right = e;
+    fixAfterInsertion(e);//保持红黑树性质  插入后进行修正
+    size++;//元素树自增
+    modCount++; 
+    return null;
+}
+```
+
+#### 总结
+
+1. TreeMap基于红黑树实现，该映射基于key的自然顺序进行排序，或者根据创建映射时提供的Comparator进行排序
+2. 不允许插入为Null的key
+3. 可以插入值为Null的Value
+4. 非线程安全
+5. 根据Key排序，Key必须实现Comparator接口，也可自定义比较器实现排序
+
+### CouncurrentHashMap
+
+在JDK8中，ConcurrentHashMap代码结构和HashMap基本相同，都是数组+链表+红黑树，其主要区别在ConcurrentHashMap支持并发：
+
+1. 使用Unsafe方法操作数组内部元素，保证可见性
+2. 在更新和移动节点时，直接锁住对应的哈希桶，锁粒度更小
+3. 针对扩容操作慢进行优化
+4. 优化哈希表计数器，采用LongAdder、Striped64类似思想
+
+#### 哈希计算
+
+```java
+static final int MOVED     = -1;          // hash for forwarding nodes
+static final int TREEBIN   = -2;          // hash for roots of trees
+static final int RESERVED  = -3;          // hash for transient reservations
+static final int HASH_BITS = 0x7fffffff;  // usable bits of normal node hash
+
+// 让高位16位，参与哈希桶定位运算的同时，保证 hash 为正
+static final int spread(int h) {
+  return (h ^ (h >>> 16)) & HASH_BITS;
+}
+```
+
+除此之外还有：
+
+- tableSizeFor：将容量转为大于n，且最小的2的幂
+- 除留余数法：hash % length = hash & (length - 1)
+- 扩容后哈希桶定位：(e.hash & oldCap)， 0-位置不变，1-原来的位置+oldCap
+
+#### 哈希桶可见性
+
+一个数组即使声明为volatile，也只能保证这个数组引用本身的可见性，其内部元素的可见性是无法保证的，如果每次都加锁，则效率必然大大降低，在CHM中使用Unsafe方法来保证可见性：
+
+```java
+static final <K,V> Node<K,V> tabAt(Node<K,V>[] tab, int i) {
+  return (Node<K,V>)U.getObjectVolatile(tab, ((long)i << ASHIFT) + ABASE);
+}
+
+static final <K,V> boolean casTabAt(Node<K,V>[] tab, int i, Node<K,V> c, Node<K,V> v) {
+  return U.compareAndSwapObject(tab, ((long)i << ASHIFT) + ABASE, c, v);
+}
+
+static final <K,V> void setTabAt(Node<K,V>[] tab, int i, Node<K,V> v) {
+  U.putObjectVolatile(tab, ((long)i << ASHIFT) + ABASE, v);
+}
+```
+
+#### 关键方法源码分析
+
+##### initTable
+
+ConcurrentHashMap在put方法被调用的时候对数组进行初始化，由于存在多个线程同时调用put的可能性，需要保证初始化的线程安全。通过initTable代码可知，多个线程的竞争通过对sizeCtl进行CAS操作实现的，如果某个线程成功把sizeCtl设置为-1，该线程就拥有了初始化的权利，进入初始化的代码模式，等到初始化完成再把sizeCtl设置回去，其他线程则一直执行while循环，自旋等待，指导数组不为null，即当初始化结束后，退出整个循环。
+
+```java
+private final Node<K,V>[] initTable() {
+  Node<K,V>[] tab; int sc;
+  while ((tab = table) == null || tab.length == 0) {
+    if ((sc = sizeCtl) < 0) Thread.yield();  // 有其他线程在初始化
+    else if (U.compareAndSwapInt(this, SIZECTL, sc, -1)) {  // 设置状态 -1
+      try {
+        if ((tab = table) == null || tab.length == 0) {
+          int n = (sc > 0) ? sc : DEFAULT_CAPACITY;  // 注意此时的 sizeCtl 表示初始容量，完毕后表示扩容阈值
+          @SuppressWarnings("unchecked")
+          Node<K,V>[] nt = (Node<K,V>[])new Node<?,?>[n];
+          table = tab = nt;
+          sc = n - (n >>> 2);  // 同 0.75n
+        }
+      } finally {
+        sizeCtl = sc;  // 注意这里没有 CAS 更新，这就是状态变量的高明了，因为前面设置了 -1，此时这里没有竞争
+      }
+      break;
+    }
+  }
+  return tab;
+}
+```
+
+##### get
+
+```java
+public V get(Object key) {
+  Node<K,V>[] tab; Node<K,V> e, p; int n, eh; K ek;
+  int h = spread(key.hashCode()); // 计算 hash
+  if ((tab = table) != null && (n = tab.length) > 0 &&  // 确保 table 已经初始化
+    
+    // 确保对应的哈希桶不为空，注意这里是 Volatile 语义获取；因为扩容的时候，是完全拷贝，所以只要不为空，则链表必然完整
+    (e = tabAt(tab, (n - 1) & h)) != null) {
+    if ((eh = e.hash) == h) {
+      if ((ek = e.key) == key || (ek != null && key.equals(ek)))
+        return e.val;
+    }
+    
+    // hash < 0，可能为红黑色节点或者当前正在扩容
+    else if (eh < 0) return (p = e.find(h, key)) != null ? p.val : null;
+    
+    while ((e = e.next) != null) { // 遍历链表
+      if (e.hash == h &&
+        ((ek = e.key) == key || (ek != null && key.equals(ek))))
+        return e.val;
+    }
+  }
+  return null;
+}
+```
+
+##### put
+
+put流程如下图所示：
+
+![chmput](https://img2018.cnblogs.com/blog/1119937/201904/1119937-20190429200101369-1250566623.png)
+
+```java
+    public V put(K key, V value) {
+        return putVal(key, value, false);
+    }
+
+    /** Implementation for put and putIfAbsent */
+    final V putVal(K key, V value, boolean onlyIfAbsent) {
+        if (key == null || value == null) throw new NullPointerException();
+        int hash = spread(key.hashCode());
+        int binCount = 0;
+        for (Node<K,V>[] tab = table;;) {
+            Node<K,V> f; int n, i, fh;
+            if (tab == null || (n = tab.length) == 0)
+                tab = initTable();
+            else if ((f = tabAt(tab, i = (n - 1) & hash)) == null) {
+                if (casTabAt(tab, i, null,
+                             new Node<K,V>(hash, key, value, null)))
+                    break;                   // no lock when adding to empty bin
+            }
+            else if ((fh = f.hash) == MOVED)
+                tab = helpTransfer(tab, f);
+            else {
+                V oldVal = null;
+                synchronized (f) {
+                    if (tabAt(tab, i) == f) {
+                        if (fh >= 0) {
+                            binCount = 1;
+                            for (Node<K,V> e = f;; ++binCount) {
+                                K ek;
+                                if (e.hash == hash &&
+                                    ((ek = e.key) == key ||
+                                     (ek != null && key.equals(ek)))) {
+                                    oldVal = e.val;
+                                    if (!onlyIfAbsent)
+                                        e.val = value;
+                                    break;
+                                }
+                                Node<K,V> pred = e;
+                                if ((e = e.next) == null) {
+                                    pred.next = new Node<K,V>(hash, key,
+                                                              value, null);
+                                    break;
+                                }
+                            }
+                        }
+                        else if (f instanceof TreeBin) {
+                            Node<K,V> p;
+                            binCount = 2;
+                            if ((p = ((TreeBin<K,V>)f).putTreeVal(hash, key,
+                                                           value)) != null) {
+                                oldVal = p.val;
+                                if (!onlyIfAbsent)
+                                    p.val = value;
+                            }
+                        }
+                    }
+                }
+                if (binCount != 0) {
+                    if (binCount >= TREEIFY_THRESHOLD)
+                        treeifyBin(tab, i);
+                    if (oldVal != null)
+                        return oldVal;
+                    break;
+                }
+            }
+        }
+        addCount(1L, binCount);
+        return null;
+    }
+```
+
+##### 扩容
+
+ CHM 中巧妙的利用任务划分，使得多个线程可能同时参与扩容；另外扩容条件也有两个：
+
+- 有链表长度超过 8，但是容量小于 64 的时候，发生扩容；
+- 节点数超过阈值的时候，发生扩容；
+
+其扩容的过程可描述为：
+
+- 首先扩容过程的中，节点首先移动到过度表 **nextTable** ，所有节点移动完毕时替换散列表 **table**；
+- 移动时先将散列表定长等分，然后逆序依次领取任务扩容，设置 **sizeCtl** 标记正在扩容；
+- 移动完成一个哈希桶或者遇到空桶时，将其标记为 **ForwardingNode** 节点，并指向 **nextTable** ；
+- 后有其他线程在操作哈希表时，遇到 **ForwardingNode** 节点，则先帮助扩容（继续领取分段任务），扩容完成后再继续之前的操作；
+
+先从treeifyBin(tab, i)方法分析。
+
+```java
+    /**
+     * Replaces all linked nodes in bin at given index unless table is
+     * too small, in which case resizes instead.
+     */
+    private final void treeifyBin(Node<K,V>[] tab, int index) {
+        Node<K,V> b; int n, sc;
+        if (tab != null) {
+            if ((n = tab.length) < MIN_TREEIFY_CAPACITY)
+                tryPresize(n << 1);
+            else if ((b = tabAt(tab, index)) != null && b.hash >= 0) {
+                synchronized (b) {
+                    if (tabAt(tab, index) == b) {
+                        TreeNode<K,V> hd = null, tl = null;
+                        for (Node<K,V> e = b; e != null; e = e.next) {
+                            TreeNode<K,V> p =
+                                new TreeNode<K,V>(e.hash, e.key, e.val,
+                                                  null, null);
+                            if ((p.prev = tl) == null)
+                                hd = p;
+                            else
+                                tl.next = p;
+                            tl = p;
+                        }
+                        setTabAt(tab, index, new TreeBin<K,V>(hd));
+                    }
+                }
+            }
+        }
+    }
+```
+
+从以上代码可以看出，当数组长度没有超过MIN_TREEIFY_CAPACITY时，不会转换为红黑树，只扩容数组。
+
+在tryPresize(int size)内部调用了一个核心函数transfer(Node<K, V>[] tab, Node<K, V>[] nextTab)方法。代码如下
+
+```java
+    /**
+     * Moves and/or copies the nodes in each bin to new table. See
+     * above for explanation.
+     */
+    private final void transfer(Node<K,V>[] tab, Node<K,V>[] nextTab) {
+        int n = tab.length, stride;
+        if ((stride = (NCPU > 1) ? (n >>> 3) / NCPU : n) < MIN_TRANSFER_STRIDE) 
+            stride = MIN_TRANSFER_STRIDE; // subdivide range // 根据CPU数量计算任务步长
+        if (nextTab == null) {            // initiating //初始化nextTab
+            try {
+                @SuppressWarnings("unchecked")
+                Node<K,V>[] nt = (Node<K,V>[])new Node<?,?>[n << 1]; // 扩容2倍
+                nextTab = nt;
+            } catch (Throwable ex) {      // try to cope with OOME
+                sizeCtl = Integer.MAX_VALUE;
+                return;
+            }
+            nextTable = nextTab;
+            transferIndex = n; // 初始的transferIndex为旧HashMap的数组长度
+        }
+        int nextn = nextTab.length;
+        ForwardingNode<K,V> fwd = new ForwardingNode<K,V>(nextTab); // 标记空桶或已经完成移动的桶
+        boolean advance = true;
+        boolean finishing = false; // to ensure sweep before committing nextTab
+        for (int i = 0, bound = 0;;) { // i为遍历的下标，bound为遍历的边界，如果成功拿到一个任务，则i = nextIndex - 1,bound = 
+            Node<K,V> f; int fh;       // nextIndex - stride，如果拿不到任务，i = 0, bound = 0
+            while (advance) {
+                int nextIndex, nextBound;
+                if (--i >= bound || finishing)
+                    advance = false;
+                else if ((nextIndex = transferIndex) <= 0) { // transferIndex <= 0，表示迁移已经完成
+                    i = -1;
+                    advance = false;
+                }
+                else if (U.compareAndSwapInt //对transferIndex进行CAS操作，即为当前线程分配一个stride，若CAS操作成功，线程成功拿到一个
+                         (this, TRANSFERINDEX, nextIndex, // stride任务。CAS操作不成功，线程没抢到任务，会继续执行while循环，自旋
+                          nextBound = (nextIndex > stride ?
+                                       nextIndex - stride : 0))) {
+                    bound = nextBound;
+                    i = nextIndex - 1;
+                    advance = false;
+                }
+            }
+            if (i < 0 || i >= n || i + n >= nextn) {
+                int sc;
+                if (finishing) {
+                    nextTable = null;
+                    table = nextTab;
+                    sizeCtl = (n << 1) - (n >>> 1);
+                    return;
+                }
+                if (U.compareAndSwapInt(this, SIZECTL, sc = sizeCtl, sc - 1)) {
+                    if ((sc - 2) != resizeStamp(n) << RESIZE_STAMP_SHIFT)
+                        return;
+                    finishing = advance = true;
+                    i = n; // recheck before commit
+                }
+            }
+            else if ((f = tabAt(tab, i)) == null)
+                advance = casTabAt(tab, i, null, fwd);
+            else if ((fh = f.hash) == MOVED)
+                advance = true; // already processed
+            else {
+                synchronized (f) {
+                    if (tabAt(tab, i) == f) {
+                        Node<K,V> ln, hn;
+                        if (fh >= 0) {
+                            int runBit = fh & n;
+                            Node<K,V> lastRun = f;
+                            for (Node<K,V> p = f.next; p != null; p = p.next) {
+                                int b = p.hash & n;
+                                if (b != runBit) {
+                                    runBit = b;
+                                    lastRun = p;
+                                }
+                            }
+                            if (runBit == 0) {
+                                ln = lastRun;
+                                hn = null;
+                            }
+                            else {
+                                hn = lastRun;
+                                ln = null;
+                            }
+                            for (Node<K,V> p = f; p != lastRun; p = p.next) {
+                                int ph = p.hash; K pk = p.key; V pv = p.val;
+                                if ((ph & n) == 0)
+                                    ln = new Node<K,V>(ph, pk, pv, ln);
+                                else
+                                    hn = new Node<K,V>(ph, pk, pv, hn);
+                            }
+                            setTabAt(nextTab, i, ln);
+                            setTabAt(nextTab, i + n, hn);
+                            setTabAt(tab, i, fwd);
+                            advance = true;
+                        }
+                        else if (f instanceof TreeBin) {
+                            TreeBin<K,V> t = (TreeBin<K,V>)f;
+                            TreeNode<K,V> lo = null, loTail = null;
+                            TreeNode<K,V> hi = null, hiTail = null;
+                            int lc = 0, hc = 0;
+                            for (Node<K,V> e = t.first; e != null; e = e.next) {
+                                int h = e.hash;
+                                TreeNode<K,V> p = new TreeNode<K,V>
+                                    (h, e.key, e.val, null, null);
+                                if ((h & n) == 0) {
+                                    if ((p.prev = loTail) == null)
+                                        lo = p;
+                                    else
+                                        loTail.next = p;
+                                    loTail = p;
+                                    ++lc;
+                                }
+                                else {
+                                    if ((p.prev = hiTail) == null)
+                                        hi = p;
+                                    else
+                                        hiTail.next = p;
+                                    hiTail = p;
+                                    ++hc;
+                                }
+                            }
+                            ln = (lc <= UNTREEIFY_THRESHOLD) ? untreeify(lo) :
+                                (hc != 0) ? new TreeBin<K,V>(lo) : t;
+                            hn = (hc <= UNTREEIFY_THRESHOLD) ? untreeify(hi) :
+                                (lc != 0) ? new TreeBin<K,V>(hi) : t;
+                            setTabAt(nextTab, i, ln);
+                            setTabAt(nextTab, i + n, hn);
+                            setTabAt(tab, i, fwd);
+                            advance = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+```
+
+#### 总结
+
+- JDK8中的CHM没有使用Segment分段锁，而且直接锁定单个哈希桶
+- 对数组中的哈希桶使用CAS操作，保证可见性
+- 扩容使用任务拆分、多线程同时扩容的方式，加速扩容
+- 对size使用计数器思想
+- CHM中对状态变量的应用，使得很多操作都可以无锁化进行
