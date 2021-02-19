@@ -1031,3 +1031,73 @@ System.out.println("平均数 : " + stats.getAverage());
 #### 异步IO(AIO)
 
 进行aio_read系统调用会立即返回，应用程序继续执行，不会阻塞，内核会在所有操作完成后向应用程序发送信号。异步IO和信号驱动IO的区别在于异步IO的信号是通知应用程序IO完成，而信号驱动IO的信息时通知应用程序可以开始IO。
+
+![img](https://www.pdai.tech/_images/io/java-io-model-4.png)
+
+### BIO
+
+#### 基本概念
+
+Block-IO: InputStream和OutStream，Reader和Writer。属于同步阻塞模型
+
+同步阻塞：一个请求占用一个进程处理，先等待数据准备好，然后从内核向进程复制数据，最后处理完数据返回
+
+#### 传统BIO通信方式
+
+以前大多数网络通信方式都是阻塞模式的，即：
+
+- 客户端向服务器端发送请求后，客户端会一直等待，指导服务端返回结果或者网络出现问题
+- 服务端当在处理某个客户端A发来的请求时，其他客户端发来的请求会等待，直到客户端A的请求处理完毕
+
+![img](https://www.pdai.tech/_images/io/java-io-bio-1.png)
+
+#### 传统BIO的问题
+
+- 同一时间，服务端只能处理一个客户端的请求，因此在高并发情况下，不能采用BIO
+- 客户端需要阻塞等待服务端的返回结果
+
+#### 问题根源
+
+重点问题不是是否使用了多线程，而是为什么accept()、read()方法会被阻塞。
+
+API文档中对serverSocket.accept()方法描述如下：
+
+> Listens for a connection to be made to this socket and accepts it. The method blocks until a connection is made.
+
+阻塞式同步IO的工作原理：
+
+- 服务器线程发起一个accept动作，询问操作系统，是否有新的socket套接字信息从端口X发送过来
+- 如果操作系统没有发现有套接字从指定端口X发送过来，那么操作系统就会等待，这样accept方法也会等待。所以accept方法会阻塞的原因是它内部的实现是使用的操作系统级别的同步IO
+
+### NIO
+
+#### 基本概念
+
+NonBlock-IO: Channel、Buffer、Selector。属于IO多路复用的同步非阻塞模型
+
+同步非阻塞：进程先将一个套接字在内核中设置成非阻塞再等待数据准备好，在这个过程中反复轮询内核数据是否准备好，准备好之后处理数据返回
+
+IO多路复用：同步非阻塞的优化版本，区别在于IO多路复用阻塞在select，epoll这样的系统调用之上，而没有阻塞在真正的IO系统调用上。也就是说，轮询机制被优化成通知机制，多个连接共用一个阻塞对象，进程只需要在一个阻塞对象上等待，无需再轮询所有连接
+
+在Java的NIO中，是基于Channel和Buffer进行操作，数据总是从通道读取到缓冲区中，或者从缓冲区写入到通道中。Selector用于监听多个通道的事件（比如：连接打开、数据到达）。因此，单个线程可以监听多个数据通道，Selector的底层实现是epoll/poll/select的IO多路复用模型，select方法会一直阻塞，指导channel中有事件就绪。
+
+#### IO多路复用
+
+##### 典型多路复用IO实现
+
+目前流程的多路复用IO实现主要包括四种: `select`、`poll`、`epoll`、`kqueue`。下表是他们的一些重要特性的比较:
+
+| IO模型 | 相对性能 | 关键思路         | 操作系统      | JAVA支持情况                                                 |
+| ------ | -------- | ---------------- | ------------- | ------------------------------------------------------------ |
+| select | 较高     | Reactor          | windows/linux | 支持，Reactor模式（反应器设计模式）。Linux操作系统的kernel2.4内核版本之前默认使用select；windows对同步IO的支持也是select模型 |
+| poll   | 较高     | Reactor          | Linux         | Linux下的Java NIO框架，Linux kernel2.6内核版本之前使用poll进行支持，也是使用的Reactor模式 |
+| epoll  | 高       | Reactor/Proactor | Linux         | Linux kernels 2.6内核版本及以后使用epoll进行支持；Linux kernels 2.6内核版本之前使用poll进行支持。由于Linux下没有Windows下的IOCP技术提供真正的 异步IO 支持，所以Linux下使用epoll模拟异步IO |
+| kqueue | 高       | Proactor         | Linux         | 目前Java版本不支持                                           |
+
+IO多路复用适用于高并发场景，所谓高并发是指1ms内至少同时又上千个连接请求准备好，其他情况下IO多路复用发挥不出其优势。
+
+##### Channel
+
+Channel是一个应用程序和操作系统事件交互、内容传递的渠道。一个通道会有一个专属的文件状态描述符。
+
+Java NIO框架中，自有Channel通道包括：
