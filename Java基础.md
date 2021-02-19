@@ -1101,3 +1101,35 @@ IO多路复用适用于高并发场景，所谓高并发是指1ms内至少同时
 Channel是一个应用程序和操作系统事件交互、内容传递的渠道。一个通道会有一个专属的文件状态描述符。
 
 Java NIO框架中，自有Channel通道包括：
+
+![img](https://www.pdai.tech/_images/io/java-io-nio-2.png)
+
+所有注册到Selector的通道，只能是继承了SelectableChannel类的子类，如上图所示
+
+- ServerSocketChannel: 应用程序服务器程序的监听通道，只有通过这个通道，应用才能向操作系统注册支持多路复用IO的端口监听，同时支持UDP和TCP协议
+- SocketChannel： TCP Socket套接字的监听通道，一个Socket套接字对应了一个客户端IP:端口到服务器IP：端口的通信连接
+- DatagramChannel： UDP数据报文的监听通道
+
+##### Buffer
+
+为了保证每个通道的数据读写速度，Java NIO框架为每一种需要支持数据读写的通道集成了Buffer的支持。Buffer有两种工作模式：写模式和读模式。在读模式下，应用程序只能从Buffer读取数据，不能进行写操作。在写模式下，应用程序可以进行读操作，这意味着可能出现脏读，所以一旦要从Buffer读取数据，一定要将Buffer切换到读模式。如下图：
+
+![img](https://www.pdai.tech/_images/io/java-io-nio-3.png)
+
+- position：缓冲区目前在操作的数据库位置
+- limit：缓冲区最大可以进行操作的位置。读写状态由该属性控制
+- capacity：缓存区的最大容量
+
+##### Selector
+
+- 事件订阅和Channel管理
+
+应用向Selector对象注册需要它关注的Channel，以及具体的某一个Channel会对哪些IO事件感兴趣。Selector也会维护一个注册的Channel数组
+
+- 轮询代理
+
+应用层不再通过阻塞模式或者非阻塞模式直接询问操作系统事件有没有发生，而是Selector代其询问
+
+- 实现不同操作系统的支持
+
+由于多路复用IO需要操作系统进行支持，其特点就是操作系统可以同时扫描同一个端口上不同网络连接的事件，所以作为上层的JVM，需要为不同操作的多路复用IO实现编写不同的代码
