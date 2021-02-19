@@ -1,0 +1,141 @@
+# 了解23种设计模式
+
+## 单例模式
+
+单例模式是最常使用的设计模式，其作用是确保某个类只有一个实例，自行实例化并向整个系统提供这个实例。在实际应用中，线程池、缓存、日志对象等常被设计成单例。总之，选择单例模式就是为了避免不一致状态。
+
+### 单例模式的几种实例方式
+
+- 饿汉式
+
+```java
+// 基于classloader机制避免了多线程同步问题
+// static变量会在classloader加载类初始化，由classloader确保线程安全
+public class Singleton {
+	private static instance = new Singleton();
+	
+	private Singleton(){}
+	
+	public static Singleton getInstance() {
+		return instance;
+	}
+}
+```
+
+- 懒汉式
+
+```java
+// 非线程安全
+public class Singleton {
+	private static instance = null;
+	
+	private Singleton(){}
+	
+	public static Singleton getInstance() {
+        if (instance == null) {
+            instance = new Singleton();
+        }
+		return instance;
+	}
+}
+```
+
+- 双检锁
+
+```java
+// 线程安全
+public class Singleton {
+	private static volatile instance = null;
+	
+	private Singleton(){}
+	
+	public static Singleton getInstance() {
+        if (instance == null) {
+            synchronized (Singleton.class) {
+                if (instance == null) {
+                    instance = new Singleton();
+                }
+            }
+        }
+		return instance;
+	}
+}
+```
+
+- 静态内部类
+
+```java
+// 线程安全
+public class Singleton {
+	private Singleton(){}
+	
+	public static Singleton getInstance() {
+        return SingletonHolder.instance;
+	}
+    
+    private static class SingletonHolder() {
+        private static Singleton instance = new Singleton();
+    }
+}
+```
+
+- 枚举实现单例模式
+
+上述几种方法都存在两个共同的缺点：
+
+> - 序列化可能会破坏单例模式
+> - 使用反射强行调用私有构造器
+
+使用枚举实现单例可以解决以上两个问题
+
+```java
+public enum SingletonEnum {
+    INSTANCE;
+    private String name;
+    public String getName() {
+        return name;
+    }
+    public void setName(String name) {
+        this.name = name;
+    }
+}
+```
+
+使用枚举单例的写法，不需要考虑序列化和反射的问题，枚举序列化是由JVM保证的，每一个枚举类型和定义的枚举变量在JVM中都是唯一的，在枚举类型的序列化和反序列化上，Java做了特殊规定：在序列化时Java仅仅是将枚举对象的name属性输出到结果中，反序列化时通过valueOf方法根据名字查找枚举对象。同时，编译器不允许任何对这种序列化机制的定制并禁用了readObject、writeObject等方法，从而保证了枚举实例的唯一性。同时无法通过反射创建枚举实例。
+
+
+
+### 单例关键点
+
+- 线程安全
+- 延迟加载
+- 序列化与反序列安全
+- 反射安全
+
+
+
+会使用常用设计模式
+
+单例、策略、工厂、适配器、责任链。
+
+实现AOP
+
+实现IOC
+
+不用synchronized和lock，实现线程安全的单例模式
+
+nio和reactor设计模式
+
+http/1.0 http/1.1 http/2之前的区别
+
+Java RMI，Socket，HttpClient
+
+cookie 与 session
+
+cookie被禁用，如何实现session
+
+了解nginx和apache服务器的特性并搭建一个对应的服务器
+
+进程间通讯的方式
+
+什么是CDN？如果实现？什么是DNS？反向代理
