@@ -876,4 +876,158 @@ put流程如下图所示：
 - 对数组中的哈希桶使用CAS操作，保证可见性
 - 扩容使用任务拆分、多线程同时扩容的方式，加速扩容
 - 对size使用计数器思想
-- CHM中对状态变量的应用，使得很多操作都可以无锁化进行
+- CHM中对状态变量的应用，使得很多操作都可以无锁化进行- 
+
+### HashSet
+
+HashSet是一个value为同一Object对象的HashMap
+
+```java
+    // HashSet初始化方法
+    public HashSet() {
+        map = new HashMap<>();
+    }
+	// 添加元素
+    public boolean add(E e) {
+        return map.put(e, PRESENT)==null; // PRESENT = new Object()
+    }
+	// 删除元素
+    public boolean remove(Object o) {
+        return map.remove(o)==PRESENT;
+    }
+```
+
+### TreeSet
+
+和HashSet一样，TreeSet是TreeMap的马甲，内部维护了一个TreeMap的变量。
+
+```java
+    private transient NavigableMap<E,Object> m;
+    public TreeSet() {
+        this(new TreeMap<E,Object>());
+    }
+```
+
+### LinkedHashSet
+
+LinkedHashSet是LinkedHashMap的小马甲
+
+```java
+    public LinkedHashSet() {
+        // 调用父类HashSet的初始化
+        super(16, .75f, true);
+    }
+    
+    HashSet(int initialCapacity, float loadFactor, boolean dummy) {
+        // 创建一个LinkedHashMap
+        map = new LinkedHashMap<>(initialCapacity, loadFactor);
+    }
+```
+
+### 集合Stream API
+
+Stream将要处理的元素看作一种流，流在管道中传输，并且可以在管道的节点上进行处理，比如筛选、排序、聚合等。元素流在管道中经过中间操作的处理，最后由最终操作得到前面处理的结果。
+
+#### 生成流
+
+- **stream()** − 为集合创建串行流。
+- **parallelStream()** − 为集合创建并行流。
+
+#### 流操作
+
+- forEach:迭代流中的每个数据
+
+```java
+Random random = new Random();
+random.ints().limit(10).forEach(System.out::println); // 使用forEach输出了10个随机数
+```
+
+- map：映射元素到对应的结果
+
+```java
+List<Integer> numbers = Arrays.asList(3, 2, 2, 3, 7, 3, 5);
+// 获取对应的平方数
+List<Integer> squaresList = numbers.stream().map( i -> i*i).distinct().collect(Collectors.toList());
+```
+
+- filter: 通过设置的条件筛选元素
+
+```java
+List<String>strings = Arrays.asList("abc", "", "bc", "efg", "abcd","", "jkl");
+// 获取空字符串的数量
+long count = strings.stream().filter(string -> string.isEmpty()).count();
+```
+
+- limit: 获取指定数量的流
+
+```java
+Random random = new Random();
+random.ints().limit(10).forEach(System.out::println);
+```
+
+- sorted: 对流进行排序
+
+```java
+Random random = new Random();
+random.ints().limit(10).sorted().forEach(System.out::println); //对输出的10个随机数进行排序
+```
+
+#### Collectors
+
+Collectors类实现了很多归约操作，例如将流转换成集合和聚合元素。Collectors可用于返回列表或字符串
+
+```java
+List<String>strings = Arrays.asList("abc", "", "bc", "efg", "abcd","", "jkl");
+List<String> filtered = strings.stream().filter(string -> !string.isEmpty()).collect(Collectors.toList());
+ 
+System.out.println("筛选列表: " + filtered);
+String mergedString = strings.stream().filter(string -> !string.isEmpty()).collect(Collectors.joining(", "));
+System.out.println("合并字符串: " + mergedString);
+```
+
+#### 统计
+
+Java提供了产生统计结果的收集器，主要用于int、double、long等基本类型上，可以用来产生如下的统计结果
+
+```java
+List<Integer> numbers = Arrays.asList(3, 2, 2, 3, 7, 3, 5);
+IntSummaryStatistics stats = numbers.stream().mapToInt((x) -> x).summaryStatistics();
+System.out.println("列表中最大的数 : " + stats.getMax());
+System.out.println("列表中最小的数 : " + stats.getMin());
+System.out.println("所有数之和 : " + stats.getSum());
+System.out.println("平均数 : " + stats.getAverage());
+```
+
+## Java IO
+
+### IO模型 - UNIX IO模型
+
+#### 阻塞式IO
+
+应用程序被阻塞，指导数据复制到应用程序缓冲区内才返回
+
+![img](https://www.pdai.tech/_images/io/java-io-model-0.png)
+
+#### 非阻塞式IO
+
+应用进程执行系统调用之后，内核返回一个错误码，应用进程可以继续执行，但是需要不断的执行系统调用来获知IO是否完成，这种方式称为轮询（polling），由于CPU要处理很多的系统调用，因此这种模型比较低效。
+
+![img](https://www.pdai.tech/_images/io/java-io-model-1.png)
+
+#### IO复用
+
+使用select和poll等待数据，并且可以等待多个socket中任何一个变为可读，这一过程会被阻塞，当某一个socket可读时返回，之后再使用recvfrom把数据从内核复制到进程内。IO复用可以使单个进行具有处理多个IO事件的能力。
+
+如果一个Web服务器没有IO复用，那么每一个socket连接都需要创建一个线程去处理，如果同时有几万个连接，那么就需要创建相同数量的线程。并且相比于多进程和多线程技术，IO复用不需要进程线程创建和切换的开销。
+
+![img](https://www.pdai.tech/_images/io/java-io-model-2.png)
+
+#### 信号驱动式IO(SIGIO)
+
+应用进程使用sigaction系统调用，内核立即返回，应用程序可以继续执行，也就是说等待数据阶段应用进程是非阻塞的，内核在数据到达时向应用进程发送SIGIO信号，应用程序收到之后在信号处理程序中调用recvfrom将数据从内核复制到应用程序中。相比于非阻塞式IO的轮询方式，信号驱动IO的CPU利用率更高。
+
+![img](https://www.pdai.tech/_images/io/java-io-model-3.png)
+
+#### 异步IO(AIO)
+
+进行aio_read系统调用会立即返回，应用程序继续执行，不会阻塞，内核会在所有操作完成后向应用程序发送信号。异步IO和信号驱动IO的区别在于异步IO的信号是通知应用程序IO完成，而信号驱动IO的信息时通知应用程序可以开始IO。
